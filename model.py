@@ -43,20 +43,28 @@ class Model:
 
                 for layer in self.layers:
                     init_weights=True if e==0 else False
-                    Z = layer.forward(Z,init_weights=init_weights)
-
+                    Z = layer.forward(Z,init_weights=init_weights) 
+                    
+                probs = Z
+                loss_ +=  self.loss_fwd(probs, y_batch)
+                error = probs                
+                    
+                    
                 y_real = y_batch
                 y = np.argmax(y_real,axis=1)
                 y_pred = Z
+                acc += sum(np.where(np.argmax(y_real,axis=1)==np.argmax(y_pred,axis=1),1,0))
 
                 summary_g = []
 
                 # backward - dCCE/dsoftmax
-                error = -y/(np.argmax(y_pred,axis=1) + util.eps())
                 if e == 0: summary_g.append(('Cross Entropy', error.ravel()))
 
-                for layer in (self.layers)[::-1]:
-                    error = layer.backward(error, learning_rate)
+                for i, layer in enumerate ((self.layers)[::-1]):
+                    if i==0:
+                        error = layer.backward(error, learning_rate,y_batch)
+                    else:
+                        error = layer.backward(error, learning_rate)
                     if e == 0: summary_g.append((layer.name, error.ravel()))
 
                 summaries.append(summary_g)
