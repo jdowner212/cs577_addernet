@@ -365,26 +365,20 @@ class Activation(Layer):
             self.output = tf.nn.softmax(X).numpy()
             return self.output
 
-    def backward(self, upstream_g, learning_rate):
+    def backward(self, upstream_g, learning_rate,y_true=None):
 
         local_g = None     
         if self.name == 'relu':
             local_g = np.where(self.input>=0,1,0)
+            dX = learning_rate*upstream_g
+            return dX
 
         elif self.name == 'softmax':
-            s = self.output
-            J = np.zeros_like(s)
-            for i in range(len(s)):
-                for j in range(len(s[i])):
-                    indicator_ij = 1 if i==j else 0
-                    J[i][j] = s[i][j]*(indicator_ij - s[i][j])
-            local_g = J
-
-        dX = np.zeros_like(self.input)
-        for i, (l,u) in enumerate(zip(local_g, upstream_g)):
-            dX[i]=learning_rate*l*u
-        
-        return dX
+            y_true = self.zeros_like(self.output) if y_true is None else y_true
+            upstream_g[range(y_true.shape[0]), np.argmax(y_true,axis=1)] -= 1
+            local_g = np.ones_like(upstream_g)
+            dX = learning_rate*upstream_g
+            return dX
 
 
 class conv_layer(Layer):
