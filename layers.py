@@ -27,6 +27,7 @@ class adder_layer(Layer):
         self.padding = padding
         self.filters = np.ones((self.output_channels,self.kernel_size,self.kernel_size,1))
         self.bias = np.zeros((self.output_channels,1,1,1))
+        self.name = 'adder'
 
     def get_adaptive_lr(self, k, dfilters, eta):
         """    
@@ -152,6 +153,7 @@ class FullyConnected(Layer):
         self.output_channels = output_channels
         self.weights=np.ones((1,self.output_channels))
         self.bias=np.zeros((1,self.output_channels))
+        self.name='fully connected'
 
     def forward(self, X,init_weights):
         self.input = X
@@ -180,6 +182,7 @@ class Flatten(Layer):
     def forward(self, X,init_weights):
         self.original_shape = X.shape
         self.output = X.reshape(X.shape[0], np.product(X.shape[1:]))
+        self.name = 'flatten'
         return self.output
 
     def backward(self, upstream_g, learning_rate):
@@ -189,12 +192,10 @@ class Flatten(Layer):
 
 class batch_norm_layer(Layer):
 
-    def __init__(self, gamma=None,beta=None):
-
-        gamma = None if not gamma else gamma
-        beta = None if not beta else beta
+    def __init__(self):
         self.gamma = 1
         self.beta = 0
+        self.name = 'Batch Norm'
 
     def forward(self, X,init_weights):
         """    
@@ -261,6 +262,7 @@ class MaxPool(Layer):
     def __init__(self,pool_size=2):
         self.pool_size=pool_size
         self.stride = pool_size
+        self.name = 'Max Pool'
 
     def forward(self,X,init_weights):
 
@@ -351,25 +353,25 @@ def softmax_bwd(X):
 class Activation(Layer):
 
     def __init__(self,activation_name):
-        self.activation_name = activation_name
+        self.name = activation_name
         super(Layer, self).__init__()
 
     def forward(self, X, init_weights=False):
         self.input = X
-        if self.activation_name == 'relu':
+        if self.name == 'relu':
             self.output = np.where(X>=0,X,0)
             return self.output
-        elif self.activation_name == 'softmax':
+        elif self.name == 'softmax':
             self.output = tf.nn.softmax(X).numpy()
             return self.output
 
     def backward(self, upstream_g, learning_rate):
 
         local_g = None     
-        if self.activation_name == 'relu':
+        if self.name == 'relu':
             local_g = np.where(self.input>=0,1,0)
 
-        elif self.activation_name == 'softmax':
+        elif self.name == 'softmax':
             s = self.output
             J = np.zeros_like(s)
             for i in range(len(s)):
@@ -382,4 +384,123 @@ class Activation(Layer):
         for i, (l,u) in enumerate(zip(local_g, upstream_g)):
             dX[i]=learning_rate*l*u
         
+        return dX
+
+
+class conv_layer(Layer):
+
+    def __init__(self,output_channels,kernel_size=3,stride=1,padding=0):
+        self.output_channels = output_channels
+
+
+        self.output_channels = output_channels
+        self.adaptive_eta=0
+
+        self.kernel_size=kernel_size        
+        self.stride = stride
+        self.padding = padding
+        self.name = 'Conv'
+
+
+
+    def forward(self,X):
+        """    
+        X       -- n_tensors x H x W x c_in
+        filters -- c_out x k_H x k_W x c_in
+        b       -- c_out x 1 x 1 x 1
+        Z       -- n_tensors x H_new x W_new, c_out
+        cache   -- info needed for backward pass
+        """
+        self.input = X
+
+        # in case input size not given
+        self.input_channels = X.shape[-1]
+
+        self.filters = np.random.normal(loc=0,scale=1,size=(self.output_channels, self.kernel_size, self.kernel_size, self.input_channels))
+        self.bias    = np.random.normal(loc=0,scale=1,size=(self.output_channels, 1,1 ,self.input_channels))
+        
+        filters,stride,padding,bias = self.filters, self.stride, self.padding, self.bias
+        n_tensors, H,   W,   c_in = X.shape
+        c_out,     H_k, W_k, c_in = filters.shape
+        n_filters = c_out
+
+        X_padded = np.pad(X, ((0,0), (padding,padding), (padding,padding), (0,0)), 'constant', constant_values = (0,0))
+        H_new = int((H + 2*padding - H_k)/stride)+1
+        W_new = int((W + 2*padding - W_k)/stride)+1
+
+        Z = np.zeros([n_tensors, H_new, W_new, c_out])
+
+        for i in range(n_tensors):           # traverse batch
+            this_img = X_padded[i,:,:,:]     # select ith image in batch
+            for f in range(n_filters):       # traverse filters
+                this_filter = filters[f,:,:,:]
+                this_bias   = bias[f,:,:,:]
+                for h in range(H_new):       # traverse height
+                    for w in range(W_new):   # traverse width
+                        v0,v1 = h*stride, h*stride + H_k
+                        h0,h1 = w*stride, w*stride + W_k
+                        this_window = this_img[v0:v1,h0:h1,:]
+
+                        Z[i, h, w, f] = np.sum((np.multiply(this_window,this_filter) + this_bias.astype(float))).astype(float)
+
+        assert Z.shape == (n_tensors, H_new, W_new, n_filters)
+
+        self.output = Z
+        self.cache = X, filters, bias, stride, padding
+        
+        return self.output
+
+    def backward(self, upstream_g, learning_rate):
+        """
+        upstream_g (dL/dZ) -- n_tensors x H_up x W_up x c_up
+        cache (values from previous layers) -- (X, W, B, s, p)               
+        
+        Output:
+        dX -- dL/dX, shape n_tensors x H_down x W_down x c_down
+        dF -- dL/dW, shape n_filters x k x k x k
+        dB -- dL/dB, shape n_filters x 1 x 1 x 1
+        """
+        X, filters, bias, stride, padding = self.cache
+
+        n_tensors, H_down, W_down, c_down = X.shape
+        n_filters, H_k,    W_k,    c_down = filters.shape
+        n_tensors, H_up,   W_up,   c_up   = upstream_g.shape
+        
+        dX       = np.zeros_like(X)                           
+        dfilters = np.zeros_like(filters)
+        dbias    = np.zeros_like(bias)
+
+        X_padded  = np.pad(X,  ((0,0), (padding,padding), (padding,padding), (0,0)), 'constant', constant_values = (0,0))
+        dX_padded = np.pad(dX, ((0,0), (padding,padding), (padding,padding), (0,0)), 'constant', constant_values = (0,0))
+        
+        for i in range(n_tensors):                       
+            x = X_padded[i]
+            dx = dX_padded[i]
+            
+            for h in range(H_up):                   # traverse height
+                for w in range(W_up):               # traverse width
+                    for c in range(c_up):           # traverse filters
+                        
+                        v0,v1 = h,h+H_k
+                        h0,h1 = w,w+W_k
+                        
+                        x_window = x[v0:v1, h0:h1, :]
+                        f_window = filters[c,:,:,:]
+
+                        dx_local = hard_tanh(f_window-x_window)
+                        df_local = x_window-f_window
+
+                        g = upstream_g[i, h, w, c]
+
+                        dx[v0:v1, v0:v1, :] += np.multiply(dx_local,g)
+                        dfilters[c,:,:,:]   += np.multiply(df_local,g)
+                        dbias[c,:,:,:]      += g
+                        
+            dX[i, :, :, :] = dx[padding:-padding, padding:-padding, :]
+        
+        assert(dX.shape == (n_tensors, H_down, W_down, c_down))
+
+        self.filters -= learning_rate*dfilters
+        self.bias    -= learning_rate*dbias
+
         return dX
