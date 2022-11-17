@@ -247,7 +247,7 @@ class batch_norm_layer(Layer):
 
         for i in range(m):
             for j in range(m):
-                dX[i] += (upstream_g[i] - upstream_g[j]*(1 + (X[i]-X[j])*(X[j]-mean)/std))
+                dX[i] += (upstream_g[i] - upstream_g[j]*(1 + (X[i]-X[j])*(X[j]-mean)/(std+eps())))
 
         dX *= self.gamma/((m**2)*std)
         

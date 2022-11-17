@@ -46,6 +46,6 @@ def load_cifar_data(folder,tiny=False, download=False):
     y_trn, y_val = y_trn[:n_90], y_trn[n_90:]
 
     if tiny:
-        X_trn,y_trn,X_tst,y_tst,X_val,y_val = X_trn[:1000],y_trn[:1000],X_tst[:100],y_tst[:100],X_val[:100],y_val[:100]
+        X_trn,y_trn,X_tst,y_tst,X_val,y_val = X_trn[:100],y_trn[:100],X_tst[:10],y_tst[:10],X_val[:100],y_val[:100]
 
     return X_trn, y_trn, X_tst, y_tst, X_val, y_val
